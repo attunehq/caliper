@@ -5,6 +5,7 @@ A flexible command-line tool for benchmarking CI commands with statistical analy
 ## Features
 
 - Run any shell command multiple times and measure execution time
+- **Warm-up run** by default to eliminate cold-start effects (caches, JIT, filesystem)
 - Handles failures gracefully and continues benchmarking
 - Calculates comprehensive statistics: mean, median, standard deviation, min, max, P90, P95
 - Outputs results in multiple formats: console, JSON, CSV, and Markdown
@@ -52,6 +53,7 @@ go install
 | `--command` | `-c` | Yes | Command to benchmark (supports shell features like `&&`, `||`, pipes) |
 | `--output-dir` | | No | Directory to save output files (default: current directory) |
 | `--name` | | No | Benchmark name for reports (default: timestamp) |
+| `--no-warmup` | | No | Skip the warm-up run (default: warm-up enabled) |
 
 ## Output Files
 
@@ -88,6 +90,12 @@ The tool generates four types of output:
 ./ci-benchmark -n 3 -c "docker-compose down && docker-compose up -d && npm test && docker-compose down"
 ```
 
+### Skip Warm-up Run
+
+```bash
+./ci-benchmark -n 10 -c "cargo build" --no-warmup
+```
+
 ## Output Format
 
 ### Console Output
@@ -96,10 +104,12 @@ The tool generates four types of output:
 CI Benchmark Tool
 =================
 Command: cargo clean && cargo build
-Runs: 10
+Runs: 10 (+ 1 warm-up)
 Output Directory: .
 
 Starting benchmark...
+
+Warm-up: ✓ Completed in 47.1s (excluded from stats)
 
 Run 1/10: ✓ Completed in 45.2s
 Run 2/10: ✓ Completed in 43.8s
@@ -110,6 +120,7 @@ Benchmark Results
 
 Command:        cargo clean && cargo build
 Total Runs:     10
+Warm-up:        47.1s (excluded from stats)
 Successful:     10
 Failed:         0
 Success Rate:   100.0%
@@ -163,10 +174,26 @@ P95      48s (48.012s)
 }
 ```
 
+## Warm-up Run
+
+By default, the tool executes a **warm-up run** before the measured benchmark runs. This eliminates cold-start effects that can skew results:
+
+- CPU/filesystem caches
+- JIT compilation
+- Dynamic linker caching
+- Docker layer caching
+
+The warm-up run is:
+- **Excluded from statistics** - only measured runs count
+- **Recorded in output files** - for transparency (JSON `warmupRun` field, CSV `warmup` row, Markdown report)
+- **Required to succeed** - if warm-up fails, the benchmark aborts
+
+Use `--no-warmup` to disable this behavior if you specifically want to measure cold-start performance.
+
 ## Exit Codes
 
 - `0`: All runs completed successfully (100% success rate)
-- `1`: One or more runs failed (< 100% success rate) or an error occurred
+- `1`: One or more runs failed, warm-up failed, or an error occurred
 
 ## Error Handling
 
@@ -185,6 +212,7 @@ This allows you to benchmark flaky commands and understand their reliability.
 - Store results in a dedicated directory for easier tracking: `--output-dir ./benchmark-results`
 - Use meaningful names for easier identification: `--name cargo-clean-build-release`
 - The tool uses `bash -c` to execute commands, so all shell features are supported
+- Keep warm-up enabled (default) unless you specifically need to measure cold-start performance
 
 ## Statistics Explained
 
