@@ -8,10 +8,11 @@ import (
 
 // Config holds the benchmark configuration
 type Config struct {
-	Command   string
-	Runs      int
-	Name      string
-	OutputDir string
+	Command    string
+	Runs       int
+	Name       string
+	OutputDir  string
+	SkipWarmup bool
 }
 
 // RunResult holds the result of a single benchmark run
@@ -24,12 +25,13 @@ type RunResult struct {
 
 // Result holds the complete benchmark results
 type Result struct {
-	Config       Config
-	Runs         []RunResult
-	Stats        Statistics
-	SuccessRate  float64
-	StartTime    time.Time
-	EndTime      time.Time
+	Config        Config
+	WarmupRun     *RunResult
+	Runs          []RunResult
+	Stats         Statistics
+	SuccessRate   float64
+	StartTime     time.Time
+	EndTime       time.Time
 	TotalDuration time.Duration
 }
 
@@ -42,6 +44,21 @@ func Run(config Config) (*Result, error) {
 	}
 
 	fmt.Printf("Starting benchmark...\n\n")
+
+	// Execute warm-up run if enabled
+	if !config.SkipWarmup {
+		fmt.Printf("Warm-up: ")
+		warmupResult := executeCommand(0, config.Command)
+		result.WarmupRun = &warmupResult
+
+		if warmupResult.Success {
+			fmt.Printf("✓ Completed in %v (excluded from stats)\n", warmupResult.Duration)
+		} else {
+			fmt.Printf("✗ Failed: %s\n", warmupResult.Error)
+			return nil, fmt.Errorf("warm-up run failed: %s", warmupResult.Error)
+		}
+		fmt.Println()
+	}
 
 	for i := 1; i <= config.Runs; i++ {
 		fmt.Printf("Run %d/%d: ", i, config.Runs)

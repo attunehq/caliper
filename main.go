@@ -18,6 +18,7 @@ func main() {
 	commandShort := flag.String("c", "", "Command to benchmark (shorthand)")
 	outputDir := flag.String("output-dir", ".", "Directory to save output files")
 	name := flag.String("name", "", "Benchmark name for reports (default: timestamp)")
+	noWarmup := flag.Bool("no-warmup", false, "Skip the warm-up run")
 
 	flag.Parse()
 
@@ -59,16 +60,21 @@ func main() {
 
 	// Create benchmark configuration
 	config := benchmark.Config{
-		Command:       cmd,
-		Runs:          numRuns,
-		Name:          benchmarkName,
-		OutputDir:     *outputDir,
+		Command:    cmd,
+		Runs:       numRuns,
+		Name:       benchmarkName,
+		OutputDir:  *outputDir,
+		SkipWarmup: *noWarmup,
 	}
 
 	fmt.Printf("CI Benchmark Tool\n")
 	fmt.Printf("=================\n")
 	fmt.Printf("Command: %s\n", config.Command)
-	fmt.Printf("Runs: %d\n", config.Runs)
+	if config.SkipWarmup {
+		fmt.Printf("Runs: %d (no warm-up)\n", config.Runs)
+	} else {
+		fmt.Printf("Runs: %d (+ 1 warm-up)\n", config.Runs)
+	}
 	fmt.Printf("Output Directory: %s\n\n", config.OutputDir)
 
 	// Run the benchmark

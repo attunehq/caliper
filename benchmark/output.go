@@ -19,6 +19,9 @@ func PrintConsole(result *Result) {
 	// Summary information
 	fmt.Printf("Command:        %s\n", result.Config.Command)
 	fmt.Printf("Total Runs:     %d\n", result.Config.Runs)
+	if result.WarmupRun != nil {
+		fmt.Printf("Warm-up:        %v (excluded from stats)\n", result.WarmupRun.Duration.Round(time.Millisecond))
+	}
 	fmt.Printf("Successful:     %d\n", result.Stats.N)
 	fmt.Printf("Failed:         %d\n", result.Config.Runs-result.Stats.N)
 	fmt.Printf("Success Rate:   %.1f%%\n", result.SuccessRate)
@@ -51,10 +54,10 @@ func SaveJSON(result *Result, filename string) error {
 	// Create a serializable version of the result
 	output := map[string]interface{}{
 		"config": map[string]interface{}{
-			"command":    result.Config.Command,
-			"runs":       result.Config.Runs,
-			"name":       result.Config.Name,
-			"outputDir":  result.Config.OutputDir,
+			"command":   result.Config.Command,
+			"runs":      result.Config.Runs,
+			"name":      result.Config.Name,
+			"outputDir": result.Config.OutputDir,
 		},
 		"summary": map[string]interface{}{
 			"totalRuns":     result.Config.Runs,
@@ -76,6 +79,15 @@ func SaveJSON(result *Result, filename string) error {
 			"p95":    result.Stats.P95,
 		},
 		"runs": result.Runs,
+	}
+
+	// Add warm-up run if present
+	if result.WarmupRun != nil {
+		output["warmupRun"] = map[string]interface{}{
+			"duration": result.WarmupRun.Duration.Seconds(),
+			"success":  result.WarmupRun.Success,
+			"error":    result.WarmupRun.Error,
+		}
 	}
 
 	file, err := os.Create(filename)
@@ -103,6 +115,19 @@ func SaveCSV(result *Result, filename string) error {
 	// Write header
 	if err := writer.Write([]string{"Run", "Success", "Duration (seconds)", "Error"}); err != nil {
 		return err
+	}
+
+	// Write warm-up run if present
+	if result.WarmupRun != nil {
+		record := []string{
+			"warmup",
+			fmt.Sprintf("%t", result.WarmupRun.Success),
+			fmt.Sprintf("%.6f", result.WarmupRun.Duration.Seconds()),
+			result.WarmupRun.Error,
+		}
+		if err := writer.Write(record); err != nil {
+			return err
+		}
 	}
 
 	// Write individual run results
@@ -154,6 +179,11 @@ func SaveMarkdown(result *Result, filename string) error {
 	md.WriteString(fmt.Sprintf("- **Command:** `%s`\n", result.Config.Command))
 	md.WriteString(fmt.Sprintf("- **Benchmark Name:** %s\n", result.Config.Name))
 	md.WriteString(fmt.Sprintf("- **Total Runs:** %d\n", result.Config.Runs))
+	if result.WarmupRun != nil {
+		md.WriteString(fmt.Sprintf("- **Warm-up Run:** %s (excluded from stats)\n", result.WarmupRun.Duration.Round(time.Millisecond)))
+	} else {
+		md.WriteString("- **Warm-up Run:** Skipped\n")
+	}
 	md.WriteString(fmt.Sprintf("- **Start Time:** %s\n", result.StartTime.Format(time.RFC1123)))
 	md.WriteString(fmt.Sprintf("- **End Time:** %s\n", result.EndTime.Format(time.RFC1123)))
 	md.WriteString(fmt.Sprintf("- **Total Duration:** %s\n\n", result.TotalDuration.Round(time.Millisecond)))
