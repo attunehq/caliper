@@ -226,4 +226,4 @@ This allows you to benchmark flaky commands and understand their reliability.
 
 ## License
 
-MIT
+Apache 2.0
