@@ -10,6 +10,7 @@ A flexible command-line tool for benchmarking CI commands with statistical analy
 - Calculates comprehensive statistics: mean, median, standard deviation, min, max, P90, P95
 - Outputs results in multiple formats: console, JSON, CSV, and Markdown
 - Tracks success rate and provides detailed error reporting
+- **Matrix mode**: Run benchmarks across multiple CPU/RAM configurations in Docker containers
 
 ## Installation
 
@@ -94,6 +95,86 @@ The tool generates four types of output:
 
 ```bash
 ./ci-benchmark -n 10 -c "cargo build" --no-warmup
+```
+
+## Matrix Mode
+
+Matrix mode allows you to benchmark across multiple CPU/RAM configurations using Docker containers. Each configuration runs sequentially to avoid resource contention.
+
+### Basic Matrix Command
+
+```bash
+./ci-benchmark matrix \
+  --image ubuntu-2404-go-rust \
+  --repo https://github.com/influxdata/influxdb \
+  --runs 10 \
+  --command "cargo clean && cargo build" \
+  --configs "2:8,4:16,8:32,16:64,32:128"
+```
+
+### Matrix Command-Line Options
+
+| Flag | Shorthand | Required | Description |
+|------|-----------|----------|-------------|
+| `--image` | | Yes | Docker image to use |
+| `--repo` | | Yes | Git repository URL to clone |
+| `--command` | `-c` | Yes | Command to benchmark |
+| `--configs` | | Yes | CPU:RAM configurations (e.g., `2:8,4:16,8:32`) |
+| `--runs` | `-n` | No | Number of runs per configuration (default: 10) |
+| `--output-dir` | | No | Directory for output files (default: `./matrix-results`) |
+| `--name` | | No | Benchmark name (default: timestamp) |
+| `--no-warmup` | | No | Skip the warm-up run |
+
+### How Matrix Mode Works
+
+For each CPU/RAM configuration, the tool:
+
+1. **Starts a Docker container** with resource limits (`--cpus`, `--cpuset-cpus`, `--memory`, `--memory-swap`)
+2. **Clones the repository** inside the container
+3. **Runs the benchmark** using the same warm-up + measured runs approach
+4. **Copies results** to the host
+5. **Stops and removes the container**
+6. **Proceeds to the next configuration**
+
+Configurations run **sequentially** to ensure accurate measurements without resource contention.
+
+### Matrix Output Structure
+
+```
+matrix-results/
+├── 2cpu_8gb/
+│   ├── benchmark_2cpu_8gb.json
+│   ├── benchmark_2cpu_8gb.csv
+│   └── benchmark_2cpu_8gb.md
+├── 4cpu_16gb/
+│   └── ...
+├── 8cpu_32gb/
+│   └── ...
+├── matrix_summary.json
+├── matrix_summary.csv
+└── matrix_summary.md
+```
+
+### Matrix Summary Table
+
+The tool outputs a comparison table:
+
+```
+Matrix Benchmark Summary
+========================
+
+Image:      ubuntu-2404-go-rust
+Repository: https://github.com/influxdata/influxdb
+Command:    cargo clean && cargo build
+Runs:       10 per configuration
+
+CPUs  RAM      Mean     Median   Std Dev  Min      Max      Success
+----  ---      ----     ------   -------  ---      ---      -------
+2     8 GB     5m23s    5m18s    12.3s    5m10s    5m45s    100%
+4     16 GB    3m12s    3m08s    8.1s     3m02s    3m25s    100%
+8     32 GB    2m01s    1m58s    5.2s     1m52s    2m10s    100%
+16    64 GB    1m15s    1m12s    3.8s     1m08s    1m22s    100%
+32    128 GB   58s      56s      2.1s     54s      1m02s    100%
 ```
 
 ## Output Format
