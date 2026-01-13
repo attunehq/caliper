@@ -1,4 +1,4 @@
-module github.com/attunehq/ci-benchmarking
+module github.com/attunehq/caliper
 
 go 1.24.2
 

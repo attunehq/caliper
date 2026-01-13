@@ -13,7 +13,7 @@ import (
 )
 
 // Run executes the matrix benchmark with all configurations sequentially
-// binaryPath should be a path to a Linux-compatible ci-benchmark binary
+// binaryPath should be a path to a Linux-compatible caliper binary
 func Run(ctx context.Context, config Config, binaryPath string) (*MatrixResult, error) {
 	result := &MatrixResult{
 		Config:  config,
@@ -44,7 +44,7 @@ func Run(ctx context.Context, config Config, binaryPath string) (*MatrixResult, 
 	}
 
 	// Create a temporary directory for workspace
-	tmpDir, err := os.MkdirTemp("", "ci-benchmark-matrix-*")
+	tmpDir, err := os.MkdirTemp("", "caliper-matrix-*")
 	if err != nil {
 		return nil, fmt.Errorf("failed to create temp directory: %w", err)
 	}
@@ -160,16 +160,16 @@ func runSingleConfig(
 	}
 	fmt.Printf("  Repository cloned successfully\n")
 
-	// Copy the ci-benchmark binary to the container
-	fmt.Printf("  Copying ci-benchmark binary to container...\n")
-	if err := container.CopyFileToContainerWithDebug(ctx, binaryPath, "/workspace/ci-benchmark", debug); err != nil {
+	// Copy the caliper binary to the container
+	fmt.Printf("  Copying caliper binary to container...\n")
+	if err := container.CopyFileToContainerWithDebug(ctx, binaryPath, "/workspace/caliper", debug); err != nil {
 		result.Error = fmt.Sprintf("failed to copy binary to container: %v", err)
 		return result
 	}
 
 	// Make the binary executable
 	debugLog(debug, "Making binary executable")
-	chmodResult, err := container.ExecShellWithDebug(ctx, "chmod +x /workspace/ci-benchmark", "/workspace", debug)
+	chmodResult, err := container.ExecShellWithDebug(ctx, "chmod +x /workspace/caliper", "/workspace", debug)
 	if err != nil || chmodResult.ExitCode != 0 {
 		result.Error = fmt.Sprintf("failed to make binary executable: %v", err)
 		return result
@@ -188,7 +188,7 @@ func runSingleConfig(
 	}
 
 	benchmarkCmd := fmt.Sprintf(
-		"/workspace/ci-benchmark --runs %d --command %q --output-dir /workspace/results --name %s %s %s",
+		"/workspace/caliper --runs %d --command %q --output-dir /workspace/results --name %s %s %s",
 		config.Runs,
 		config.Command,
 		benchmarkName,

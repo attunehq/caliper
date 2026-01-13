@@ -171,7 +171,7 @@ func SaveMarkdown(result *Result, filename string) error {
 	var md strings.Builder
 
 	// Header
-	md.WriteString("# CI Benchmark Report\n\n")
+	md.WriteString("# Caliper Benchmark Report\n\n")
 	md.WriteString(fmt.Sprintf("**Generated:** %s\n\n", result.EndTime.Format(time.RFC1123)))
 
 	// Configuration
