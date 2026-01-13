@@ -16,6 +16,24 @@ A command-line tool that measures build performance across different CPU/RAM con
 
 ## Installation
 
+### Quick install (Linux & macOS)
+
+```bash
+curl -sSL https://raw.githubusercontent.com/attunehq/caliper/main/install.sh | sh
+```
+
+Install a specific version:
+
+```bash
+curl -sSL https://raw.githubusercontent.com/attunehq/caliper/main/install.sh | sh -s -- --version v0.1.0
+```
+
+Install to a custom directory:
+
+```bash
+curl -sSL https://raw.githubusercontent.com/attunehq/caliper/main/install.sh | sh -s -- --dir ~/.local/bin
+```
+
 ### Build from source
 
 ```bash
