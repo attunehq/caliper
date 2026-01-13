@@ -14,7 +14,15 @@ import (
 	"github.com/attunehq/caliper/matrix"
 )
 
+var version = "dev"
+
 func main() {
+	// Check for version flag
+	if len(os.Args) > 1 && (os.Args[1] == "--version" || os.Args[1] == "-v") {
+		fmt.Printf("caliper %s\n", version)
+		return
+	}
+
 	// Check for subcommand
 	if len(os.Args) > 1 && os.Args[1] == "matrix" {
 		runMatrix(os.Args[2:])
