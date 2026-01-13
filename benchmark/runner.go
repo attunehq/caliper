@@ -2,6 +2,7 @@ package benchmark
 
 import (
 	"fmt"
+	"os"
 	"os/exec"
 	"time"
 )
@@ -13,6 +14,7 @@ type Config struct {
 	Name       string
 	OutputDir  string
 	SkipWarmup bool
+	Debug      bool // Enable verbose output (stream command stdout/stderr)
 }
 
 // RunResult holds the result of a single benchmark run
@@ -47,29 +49,53 @@ func Run(config Config) (*Result, error) {
 
 	// Execute warm-up run if enabled
 	if !config.SkipWarmup {
-		fmt.Printf("Warm-up: ")
-		warmupResult := executeCommand(0, config.Command)
+		if config.Debug {
+			fmt.Printf("Warm-up: (streaming output)\n")
+		} else {
+			fmt.Printf("Warm-up: ")
+		}
+		warmupResult := executeCommand(0, config.Command, config.Debug)
 		result.WarmupRun = &warmupResult
 
 		if warmupResult.Success {
-			fmt.Printf("✓ Completed in %v (excluded from stats)\n", warmupResult.Duration)
+			if config.Debug {
+				fmt.Printf("Warm-up: ✓ Completed in %v (excluded from stats)\n", warmupResult.Duration)
+			} else {
+				fmt.Printf("✓ Completed in %v (excluded from stats)\n", warmupResult.Duration)
+			}
 		} else {
-			fmt.Printf("✗ Failed: %s\n", warmupResult.Error)
+			if config.Debug {
+				fmt.Printf("Warm-up: ✗ Failed: %s\n", warmupResult.Error)
+			} else {
+				fmt.Printf("✗ Failed: %s\n", warmupResult.Error)
+			}
 			return nil, fmt.Errorf("warm-up run failed: %s", warmupResult.Error)
 		}
 		fmt.Println()
 	}
 
 	for i := 1; i <= config.Runs; i++ {
-		fmt.Printf("Run %d/%d: ", i, config.Runs)
+		if config.Debug {
+			fmt.Printf("Run %d/%d: (streaming output)\n", i, config.Runs)
+		} else {
+			fmt.Printf("Run %d/%d: ", i, config.Runs)
+		}
 
-		runResult := executeCommand(i, config.Command)
+		runResult := executeCommand(i, config.Command, config.Debug)
 		result.Runs = append(result.Runs, runResult)
 
 		if runResult.Success {
-			fmt.Printf("✓ Completed in %v\n", runResult.Duration)
+			if config.Debug {
+				fmt.Printf("Run %d/%d: ✓ Completed in %v\n", i, config.Runs, runResult.Duration)
+			} else {
+				fmt.Printf("✓ Completed in %v\n", runResult.Duration)
+			}
 		} else {
-			fmt.Printf("✗ Failed: %s\n", runResult.Error)
+			if config.Debug {
+				fmt.Printf("Run %d/%d: ✗ Failed: %s\n", i, config.Runs, runResult.Error)
+			} else {
+				fmt.Printf("✗ Failed: %s\n", runResult.Error)
+			}
 		}
 	}
 
@@ -97,13 +123,19 @@ func Run(config Config) (*Result, error) {
 }
 
 // executeCommand runs a single benchmark iteration
-func executeCommand(runNumber int, command string) RunResult {
+func executeCommand(runNumber int, command string, debug bool) RunResult {
 	result := RunResult{
 		RunNumber: runNumber,
 	}
 
 	// Use bash to execute the command (supports && and other shell features)
 	cmd := exec.Command("bash", "-c", command)
+
+	// Stream stdout/stderr when debug is enabled
+	if debug {
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+	}
 
 	startTime := time.Now()
 	err := cmd.Run()

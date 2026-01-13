@@ -32,6 +32,7 @@ type Config struct {
 	Name       string           // Benchmark name for reports
 	Configs    []ResourceConfig // CPU/RAM configurations to test
 	SkipWarmup bool             // Skip warm-up run
+	Debug      bool             // Enable debug logging with real-time output
 }
 
 // RepoName extracts the repository name from the RepoURL

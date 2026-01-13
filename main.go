@@ -34,6 +34,7 @@ func runSingleBenchmark() {
 	outputDir := flag.String("output-dir", ".", "Directory to save output files")
 	name := flag.String("name", "", "Benchmark name for reports (default: timestamp)")
 	noWarmup := flag.Bool("no-warmup", false, "Skip the warm-up run")
+	debug := flag.Bool("debug", false, "Enable debug logging with real-time command output")
 
 	flag.Parse()
 
@@ -80,6 +81,7 @@ func runSingleBenchmark() {
 		Name:       benchmarkName,
 		OutputDir:  *outputDir,
 		SkipWarmup: *noWarmup,
+		Debug:      *debug,
 	}
 
 	fmt.Printf("CI Benchmark Tool\n")
@@ -144,6 +146,7 @@ func runMatrix(args []string) {
 	outputDir := matrixFlags.String("output-dir", "./matrix-results", "Directory to save output files")
 	name := matrixFlags.String("name", "", "Benchmark name for reports (default: timestamp)")
 	noWarmup := matrixFlags.Bool("no-warmup", false, "Skip the warm-up run")
+	debug := matrixFlags.Bool("debug", false, "Enable debug logging with real-time output")
 
 	matrixFlags.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Usage: ci-benchmark matrix [options]\n\n")
@@ -222,6 +225,7 @@ func runMatrix(args []string) {
 		Name:       benchmarkName,
 		Configs:    resourceConfigs,
 		SkipWarmup: *noWarmup,
+		Debug:      *debug,
 	}
 
 	// Set up context with cancellation on interrupt

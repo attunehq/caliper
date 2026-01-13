@@ -20,6 +20,9 @@ func Run(ctx context.Context, config Config, binaryPath string) (*MatrixResult, 
 		Results: make([]ConfigResult, 0, len(config.Configs)),
 	}
 
+	debugLog(config.Debug, "Starting matrix benchmark")
+	debugLog(config.Debug, "Binary path: %s", binaryPath)
+
 	// Create Docker client
 	dockerClient, err := NewDockerClient()
 	if err != nil {
@@ -29,11 +32,13 @@ func Run(ctx context.Context, config Config, binaryPath string) (*MatrixResult, 
 
 	// Ensure the Docker image exists
 	fmt.Printf("Checking Docker image: %s\n", config.Image)
+	debugLog(config.Debug, "Checking if image exists locally: %s", config.Image)
 	if err := dockerClient.EnsureImage(ctx, config.Image); err != nil {
 		return nil, fmt.Errorf("failed to ensure Docker image: %w", err)
 	}
 
 	// Create output directory
+	debugLog(config.Debug, "Creating output directory: %s", config.OutputDir)
 	if err := os.MkdirAll(config.OutputDir, 0755); err != nil {
 		return nil, fmt.Errorf("failed to create output directory: %w", err)
 	}
@@ -44,6 +49,7 @@ func Run(ctx context.Context, config Config, binaryPath string) (*MatrixResult, 
 		return nil, fmt.Errorf("failed to create temp directory: %w", err)
 	}
 	defer os.RemoveAll(tmpDir)
+	debugLog(config.Debug, "Created temp directory: %s", tmpDir)
 
 	fmt.Printf("\nMatrix Benchmark\n")
 	fmt.Printf("================\n")
@@ -51,7 +57,11 @@ func Run(ctx context.Context, config Config, binaryPath string) (*MatrixResult, 
 	fmt.Printf("Repository: %s\n", config.RepoURL)
 	fmt.Printf("Command:    %s\n", config.Command)
 	fmt.Printf("Runs:       %d per configuration\n", config.Runs)
-	fmt.Printf("Configs:    %d configurations\n\n", len(config.Configs))
+	fmt.Printf("Configs:    %d configurations\n", len(config.Configs))
+	if config.Debug {
+		fmt.Printf("Debug:      enabled\n")
+	}
+	fmt.Printf("\n")
 
 	// Run each configuration sequentially
 	for i, resourceCfg := range config.Configs {
@@ -81,6 +91,7 @@ func runSingleConfig(
 	binaryPath string,
 	tmpDir string,
 ) ConfigResult {
+	debug := config.Debug
 	result := ConfigResult{
 		Config:    resourceCfg,
 		TotalRuns: config.Runs,
@@ -88,6 +99,7 @@ func runSingleConfig(
 
 	// Create a workspace directory for this configuration
 	workspaceDir := filepath.Join(tmpDir, resourceCfg.DirName())
+	debugLog(debug, "Creating workspace directory: %s", workspaceDir)
 	if err := os.MkdirAll(workspaceDir, 0755); err != nil {
 		result.Error = fmt.Sprintf("failed to create workspace directory: %v", err)
 		return result
@@ -95,6 +107,7 @@ func runSingleConfig(
 
 	// Create output directory for this configuration
 	outputDir := filepath.Join(config.OutputDir, resourceCfg.DirName())
+	debugLog(debug, "Creating output directory: %s", outputDir)
 	if err := os.MkdirAll(outputDir, 0755); err != nil {
 		result.Error = fmt.Sprintf("failed to create output directory: %v", err)
 		return result
@@ -103,12 +116,12 @@ func runSingleConfig(
 	fmt.Printf("  Starting container with %d CPUs, %d GB RAM...\n", resourceCfg.CPUs, resourceCfg.Memory)
 
 	// Create container with resource limits
-	container, err := dockerClient.CreateContainer(ctx, ContainerConfig{
+	container, err := dockerClient.CreateContainerWithDebug(ctx, ContainerConfig{
 		Image:     config.Image,
 		CPUs:      resourceCfg.CPUs,
 		Memory:    resourceCfg.Memory,
 		MountPath: workspaceDir,
-	})
+	}, debug)
 	if err != nil {
 		result.Error = fmt.Sprintf("failed to create container: %v", err)
 		return result
@@ -117,16 +130,26 @@ func runSingleConfig(
 	// Ensure container is stopped and removed when done
 	defer func() {
 		fmt.Printf("  Stopping and removing container...\n")
+		debugLog(debug, "Stopping container: %s", container.ID)
 		if err := container.Stop(ctx); err != nil {
 			fmt.Printf("  Warning: failed to stop container: %v\n", err)
 		}
+		debugLog(debug, "Container stopped and removed")
 	}()
 
 	fmt.Printf("  Container started: %s\n", container.ID[:12])
 
 	// Clone repository
 	fmt.Printf("  Cloning repository: %s\n", config.RepoURL)
-	cloneResult, err := container.ExecShell(ctx, fmt.Sprintf("git clone --depth 1 %s /workspace/repo", config.RepoURL), "/workspace")
+	cloneCmd := fmt.Sprintf("git clone --depth 1 %s /workspace/repo", config.RepoURL)
+	debugLog(debug, "Clone command: %s", cloneCmd)
+
+	var cloneResult *ExecResult
+	if debug {
+		cloneResult, err = container.ExecShellStreaming(ctx, cloneCmd, "/workspace", debug)
+	} else {
+		cloneResult, err = container.ExecShell(ctx, cloneCmd, "/workspace")
+	}
 	if err != nil {
 		result.Error = fmt.Sprintf("failed to execute git clone: %v", err)
 		return result
@@ -139,13 +162,14 @@ func runSingleConfig(
 
 	// Copy the ci-benchmark binary to the container
 	fmt.Printf("  Copying ci-benchmark binary to container...\n")
-	if err := container.CopyFileToContainer(ctx, binaryPath, "/workspace/ci-benchmark"); err != nil {
+	if err := container.CopyFileToContainerWithDebug(ctx, binaryPath, "/workspace/ci-benchmark", debug); err != nil {
 		result.Error = fmt.Sprintf("failed to copy binary to container: %v", err)
 		return result
 	}
 
 	// Make the binary executable
-	chmodResult, err := container.ExecShell(ctx, "chmod +x /workspace/ci-benchmark", "/workspace")
+	debugLog(debug, "Making binary executable")
+	chmodResult, err := container.ExecShellWithDebug(ctx, "chmod +x /workspace/ci-benchmark", "/workspace", debug)
 	if err != nil || chmodResult.ExitCode != 0 {
 		result.Error = fmt.Sprintf("failed to make binary executable: %v", err)
 		return result
@@ -158,28 +182,39 @@ func runSingleConfig(
 	if config.SkipWarmup {
 		warmupFlag = "--no-warmup"
 	}
+	debugFlag := ""
+	if debug {
+		debugFlag = "--debug"
+	}
 
 	benchmarkCmd := fmt.Sprintf(
-		"/workspace/ci-benchmark --runs %d --command %q --output-dir /workspace/results --name %s %s",
+		"/workspace/ci-benchmark --runs %d --command %q --output-dir /workspace/results --name %s %s %s",
 		config.Runs,
 		config.Command,
 		benchmarkName,
 		warmupFlag,
+		debugFlag,
 	)
 
 	fmt.Printf("  Running benchmark: %s\n", config.Command)
-	fmt.Printf("  Number of runs: %d\n\n", config.Runs)
+	fmt.Printf("  Number of runs: %d\n", config.Runs)
+	debugLog(debug, "Full benchmark command: %s", benchmarkCmd)
+	fmt.Println()
 
 	// Create results directory in container
-	mkdirResult, err := container.ExecShell(ctx, "mkdir -p /workspace/results", "/workspace")
+	debugLog(debug, "Creating results directory in container")
+	mkdirResult, err := container.ExecShellWithDebug(ctx, "mkdir -p /workspace/results", "/workspace", debug)
 	if err != nil || mkdirResult.ExitCode != 0 {
 		result.Error = fmt.Sprintf("failed to create results directory: %v", err)
 		return result
 	}
 
-	// Run the benchmark
+	// Run the benchmark - always use streaming to show progress
 	startTime := time.Now()
-	benchResult, err := container.ExecShell(ctx, benchmarkCmd, "/workspace/repo")
+	debugLog(debug, "Starting benchmark at %s", startTime.Format(time.RFC3339))
+
+	// Use streaming for the benchmark command so users can see progress
+	benchResult, err := container.ExecShellStreaming(ctx, benchmarkCmd, "/workspace/repo", debug)
 	duration := time.Since(startTime)
 
 	if err != nil {
@@ -187,10 +222,9 @@ func runSingleConfig(
 		return result
 	}
 
-	// Print benchmark output
-	if benchResult.Stdout != "" {
-		fmt.Print(benchResult.Stdout)
-	}
+	debugLog(debug, "Benchmark completed in %s", duration)
+
+	// Note: stdout/stderr already printed by streaming, but show stderr on error
 	if benchResult.Stderr != "" && benchResult.ExitCode != 0 {
 		fmt.Printf("  Stderr: %s\n", benchResult.Stderr)
 	}
@@ -199,6 +233,7 @@ func runSingleConfig(
 
 	// Copy results from container
 	fmt.Printf("  Copying results from container...\n")
+	debugLog(debug, "Copying from /workspace/results to %s", outputDir)
 	if err := container.CopyDirFromContainer(ctx, "/workspace/results", outputDir); err != nil {
 		result.Error = fmt.Sprintf("failed to copy results from container: %v", err)
 		return result
@@ -206,9 +241,11 @@ func runSingleConfig(
 
 	// Parse the JSON results to extract statistics
 	jsonPath := filepath.Join(outputDir, fmt.Sprintf("%s.json", benchmarkName))
+	debugLog(debug, "Parsing results JSON: %s", jsonPath)
 	if err := parseResultsJSON(jsonPath, &result); err != nil {
 		// Not a fatal error, just warn
 		fmt.Printf("  Warning: failed to parse results JSON: %v\n", err)
+		debugLog(debug, "JSON parse error: %v", err)
 		if benchResult.ExitCode != 0 {
 			result.Error = fmt.Sprintf("benchmark failed (exit code %d)", benchResult.ExitCode)
 			return result

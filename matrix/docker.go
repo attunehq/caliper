@@ -17,6 +17,13 @@ import (
 	"github.com/docker/docker/pkg/stdcopy"
 )
 
+// debugLog prints a debug message if debug mode is enabled
+func debugLog(debug bool, format string, args ...interface{}) {
+	if debug {
+		fmt.Printf("[DEBUG] "+format+"\n", args...)
+	}
+}
+
 // DockerClient wraps the Docker SDK client
 type DockerClient struct {
 	cli *client.Client
@@ -78,6 +85,11 @@ func (d *DockerClient) EnsureImage(ctx context.Context, imageName string) error 
 
 // CreateContainer creates and starts a new container with resource limits
 func (d *DockerClient) CreateContainer(ctx context.Context, cfg ContainerConfig) (*Container, error) {
+	return d.CreateContainerWithDebug(ctx, cfg, false)
+}
+
+// CreateContainerWithDebug creates and starts a new container with resource limits and optional debug logging
+func (d *DockerClient) CreateContainerWithDebug(ctx context.Context, cfg ContainerConfig, debug bool) (*Container, error) {
 	// Calculate resource limits
 	memoryBytes := int64(cfg.Memory) * 1024 * 1024 * 1024 // Convert GB to bytes
 	nanoCPUs := int64(cfg.CPUs) * 1e9                     // Docker uses nano CPUs
@@ -87,6 +99,13 @@ func (d *DockerClient) CreateContainer(ctx context.Context, cfg ContainerConfig)
 	if cfg.CPUs == 1 {
 		cpusetCPUs = "0"
 	}
+
+	debugLog(debug, "Creating container with config:")
+	debugLog(debug, "  Image: %s", cfg.Image)
+	debugLog(debug, "  Memory: %d bytes (%d GB)", memoryBytes, cfg.Memory)
+	debugLog(debug, "  NanoCPUs: %d (%d CPUs)", nanoCPUs, cfg.CPUs)
+	debugLog(debug, "  CpusetCpus: %s", cpusetCPUs)
+	debugLog(debug, "  MountPath: %s -> /workspace", cfg.MountPath)
 
 	// Container configuration
 	containerCfg := &container.Config{
@@ -110,17 +129,21 @@ func (d *DockerClient) CreateContainer(ctx context.Context, cfg ContainerConfig)
 	}
 
 	// Create the container
+	debugLog(debug, "Calling Docker API: ContainerCreate")
 	resp, err := d.cli.ContainerCreate(ctx, containerCfg, hostCfg, nil, nil, "")
 	if err != nil {
 		return nil, fmt.Errorf("failed to create container: %w", err)
 	}
+	debugLog(debug, "Container created with ID: %s", resp.ID)
 
 	// Start the container
+	debugLog(debug, "Calling Docker API: ContainerStart")
 	if err := d.cli.ContainerStart(ctx, resp.ID, container.StartOptions{}); err != nil {
 		// Clean up the created container
 		_ = d.cli.ContainerRemove(ctx, resp.ID, container.RemoveOptions{Force: true})
 		return nil, fmt.Errorf("failed to start container: %w", err)
 	}
+	debugLog(debug, "Container started successfully")
 
 	return &Container{
 		ID:     resp.ID,
@@ -180,8 +203,87 @@ func (c *Container) ExecShell(ctx context.Context, command string, workDir strin
 	return c.Exec(ctx, []string{"bash", "-c", command}, workDir)
 }
 
+// ExecShellStreaming executes a shell command in the container with real-time output streaming
+func (c *Container) ExecShellStreaming(ctx context.Context, command string, workDir string, debug bool) (*ExecResult, error) {
+	debugLog(debug, "Executing command (streaming): %s", command)
+	debugLog(debug, "Working directory: %s", workDir)
+
+	execCfg := container.ExecOptions{
+		Cmd:          []string{"bash", "-c", command},
+		WorkingDir:   workDir,
+		AttachStdout: true,
+		AttachStderr: true,
+	}
+
+	debugLog(debug, "Calling Docker API: ContainerExecCreate")
+	execResp, err := c.client.cli.ContainerExecCreate(ctx, c.ID, execCfg)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create exec: %w", err)
+	}
+	debugLog(debug, "Exec created with ID: %s", execResp.ID)
+
+	debugLog(debug, "Calling Docker API: ContainerExecAttach")
+	attachResp, err := c.client.cli.ContainerExecAttach(ctx, execResp.ID, container.ExecStartOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("failed to attach to exec: %w", err)
+	}
+	defer attachResp.Close()
+	debugLog(debug, "Attached to exec, streaming output...")
+
+	// Stream stdout and stderr to console while also capturing them
+	var stdout, stderr bytes.Buffer
+
+	// Use TeeReader to both stream to console and capture output
+	// stdcopy.StdCopy demultiplexes the Docker stream into stdout and stderr
+	stdoutWriter := io.MultiWriter(&stdout, os.Stdout)
+	stderrWriter := io.MultiWriter(&stderr, os.Stderr)
+
+	_, err = stdcopy.StdCopy(stdoutWriter, stderrWriter, attachResp.Reader)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read exec output: %w", err)
+	}
+
+	debugLog(debug, "Command output complete, getting exit code...")
+
+	// Get exit code
+	debugLog(debug, "Calling Docker API: ContainerExecInspect")
+	inspectResp, err := c.client.cli.ContainerExecInspect(ctx, execResp.ID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to inspect exec: %w", err)
+	}
+	debugLog(debug, "Exit code: %d", inspectResp.ExitCode)
+
+	return &ExecResult{
+		ExitCode: inspectResp.ExitCode,
+		Stdout:   stdout.String(),
+		Stderr:   stderr.String(),
+	}, nil
+}
+
+// ExecShellWithDebug executes a shell command with optional debug logging (non-streaming)
+func (c *Container) ExecShellWithDebug(ctx context.Context, command string, workDir string, debug bool) (*ExecResult, error) {
+	debugLog(debug, "Executing command: %s", command)
+	debugLog(debug, "Working directory: %s", workDir)
+	result, err := c.Exec(ctx, []string{"bash", "-c", command}, workDir)
+	if err != nil {
+		debugLog(debug, "Command failed with error: %v", err)
+	} else {
+		debugLog(debug, "Command completed with exit code: %d", result.ExitCode)
+	}
+	return result, err
+}
+
 // CopyFileToContainer copies a file from the host to the container
 func (c *Container) CopyFileToContainer(ctx context.Context, srcPath, dstPath string) error {
+	return c.CopyFileToContainerWithDebug(ctx, srcPath, dstPath, false)
+}
+
+// CopyFileToContainerWithDebug copies a file from the host to the container with optional debug logging
+func (c *Container) CopyFileToContainerWithDebug(ctx context.Context, srcPath, dstPath string, debug bool) error {
+	debugLog(debug, "Copying file to container:")
+	debugLog(debug, "  Source: %s", srcPath)
+	debugLog(debug, "  Destination: %s", dstPath)
+
 	// Read the source file
 	content, err := os.ReadFile(srcPath)
 	if err != nil {
@@ -193,6 +295,9 @@ func (c *Container) CopyFileToContainer(ctx context.Context, srcPath, dstPath st
 	if err != nil {
 		return fmt.Errorf("failed to stat source file: %w", err)
 	}
+
+	debugLog(debug, "  File size: %.2f MB", float64(len(content))/(1024*1024))
+	debugLog(debug, "  File mode: %s", fileInfo.Mode())
 
 	// Create a tar archive containing the file
 	var buf bytes.Buffer
@@ -217,13 +322,17 @@ func (c *Container) CopyFileToContainer(ctx context.Context, srcPath, dstPath st
 		return fmt.Errorf("failed to close tar writer: %w", err)
 	}
 
+	debugLog(debug, "  Tar archive size: %.2f MB", float64(buf.Len())/(1024*1024))
+
 	// Copy the tar archive to the container
 	dstDir := filepath.Dir(dstPath)
+	debugLog(debug, "Calling Docker API: CopyToContainer (destination dir: %s)", dstDir)
 	err = c.client.cli.CopyToContainer(ctx, c.ID, dstDir, &buf, container.CopyToContainerOptions{})
 	if err != nil {
 		return fmt.Errorf("failed to copy to container: %w", err)
 	}
 
+	debugLog(debug, "File copied successfully")
 	return nil
 }
 
