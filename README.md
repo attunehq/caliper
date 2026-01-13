@@ -1,6 +1,8 @@
-# CI Benchmarking Tool
+# Caliper
 
-A flexible command-line tool for benchmarking CI commands with statistical analysis and multiple output formats.
+Precision benchmarking to find optimal CI runner sizes.
+
+A command-line tool that measures build performance across different CPU/RAM configurations, helping you right-size your CI runners.
 
 ## Features
 
@@ -17,7 +19,7 @@ A flexible command-line tool for benchmarking CI commands with statistical analy
 ### Build from source
 
 ```bash
-go build -o ci-benchmark
+go build -o caliper
 ```
 
 ### Install globally (optional)
@@ -31,19 +33,19 @@ go install
 ### Basic Command
 
 ```bash
-./ci-benchmark --runs 10 --command "cargo clean && cargo build"
+./caliper --runs 10 --command "cargo clean && cargo build"
 ```
 
 ### Shorthand Flags
 
 ```bash
-./ci-benchmark -n 10 -c "cargo clean && cargo build"
+./caliper -n 10 -c "cargo clean && cargo build"
 ```
 
 ### With Custom Output Directory and Name
 
 ```bash
-./ci-benchmark -n 5 -c "npm test" --output-dir ./results --name npm-test-benchmark
+./caliper -n 5 -c "npm test" --output-dir ./results --name npm-test-benchmark
 ```
 
 ## Command-Line Options
@@ -70,31 +72,31 @@ The tool generates four types of output:
 ### Benchmarking Cargo Build
 
 ```bash
-./ci-benchmark -n 10 -c "cargo clean && cargo build"
+./caliper -n 10 -c "cargo clean && cargo build"
 ```
 
 ### Benchmarking with Release Mode
 
 ```bash
-./ci-benchmark -n 5 -c "cargo clean && cargo build --release" --name cargo-release
+./caliper -n 5 -c "cargo clean && cargo build --release" --name cargo-release
 ```
 
 ### Benchmarking Tests
 
 ```bash
-./ci-benchmark -n 20 -c "npm run test" --name npm-tests --output-dir ./benchmark-results
+./caliper -n 20 -c "npm run test" --name npm-tests --output-dir ./benchmark-results
 ```
 
 ### Complex Shell Commands
 
 ```bash
-./ci-benchmark -n 3 -c "docker-compose down && docker-compose up -d && npm test && docker-compose down"
+./caliper -n 3 -c "docker-compose down && docker-compose up -d && npm test && docker-compose down"
 ```
 
 ### Skip Warm-up Run
 
 ```bash
-./ci-benchmark -n 10 -c "cargo build" --no-warmup
+./caliper -n 10 -c "cargo build" --no-warmup
 ```
 
 ## Matrix Mode
@@ -104,7 +106,7 @@ Matrix mode allows you to benchmark across multiple CPU/RAM configurations using
 ### Basic Matrix Command
 
 ```bash
-./ci-benchmark matrix \
+./caliper matrix \
   --image ubuntu-2404-go-rust \
   --repo https://github.com/influxdata/influxdb \
   --runs 10 \
@@ -182,8 +184,8 @@ CPUs  RAM      Mean     Median   Std Dev  Min      Max      Success
 ### Console Output
 
 ```
-CI Benchmark Tool
-=================
+Caliper
+=======
 Command: cargo clean && cargo build
 Runs: 10 (+ 1 warm-up)
 Output Directory: .

@@ -10,8 +10,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/attunehq/ci-benchmarking/benchmark"
-	"github.com/attunehq/ci-benchmarking/matrix"
+	"github.com/attunehq/caliper/benchmark"
+	"github.com/attunehq/caliper/matrix"
 )
 
 func main() {
@@ -84,8 +84,8 @@ func runSingleBenchmark() {
 		Debug:      *debug,
 	}
 
-	fmt.Printf("CI Benchmark Tool\n")
-	fmt.Printf("=================\n")
+	fmt.Printf("Caliper\n")
+	fmt.Printf("=======\n")
 	fmt.Printf("Command: %s\n", config.Command)
 	if config.SkipWarmup {
 		fmt.Printf("Runs: %d (no warm-up)\n", config.Runs)
@@ -149,12 +149,12 @@ func runMatrix(args []string) {
 	debug := matrixFlags.Bool("debug", false, "Enable debug logging with real-time output")
 
 	matrixFlags.Usage = func() {
-		fmt.Fprintf(os.Stderr, "Usage: ci-benchmark matrix [options]\n\n")
+		fmt.Fprintf(os.Stderr, "Usage: caliper matrix [options]\n\n")
 		fmt.Fprintf(os.Stderr, "Run benchmarks across multiple CPU/RAM configurations in Docker containers.\n\n")
 		fmt.Fprintf(os.Stderr, "Options:\n")
 		matrixFlags.PrintDefaults()
 		fmt.Fprintf(os.Stderr, "\nExample:\n")
-		fmt.Fprintf(os.Stderr, "  ci-benchmark matrix \\\n")
+		fmt.Fprintf(os.Stderr, "  caliper matrix \\\n")
 		fmt.Fprintf(os.Stderr, "    --image ubuntu-2404-go-rust \\\n")
 		fmt.Fprintf(os.Stderr, "    --repo https://github.com/influxdata/influxdb \\\n")
 		fmt.Fprintf(os.Stderr, "    --runs 10 \\\n")
@@ -242,7 +242,7 @@ func runMatrix(args []string) {
 	}()
 
 	// Build the static binary for Linux containers
-	tmpBinary := filepath.Join(os.TempDir(), "ci-benchmark-linux")
+	tmpBinary := filepath.Join(os.TempDir(), "caliper-linux")
 	if err := matrix.BuildStaticBinary(tmpBinary); err != nil {
 		fmt.Fprintf(os.Stderr, "Error building static binary: %v\n", err)
 		os.Exit(1)
