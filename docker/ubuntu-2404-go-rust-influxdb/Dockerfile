@@ -17,6 +17,7 @@ RUN apt-get update && \
         lld \
         git \
         protobuf-compiler \
+        libprotobuf-dev \
         python3 \
         python3-dev \
         python3-pip \
