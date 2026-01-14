@@ -186,12 +186,31 @@ func SaveSummaryMarkdown(result *MatrixResult, filename string) error {
 	md.WriteString("# Matrix Benchmark Report\n\n")
 	md.WriteString(fmt.Sprintf("**Generated:** %s\n\n", time.Now().Format(time.RFC1123)))
 
+	// Benchmark type
+	if result.Config.Type != "" {
+		md.WriteString(fmt.Sprintf("**Benchmark Type:** %s\n\n", result.Config.Type))
+	}
+
 	// Configuration
 	md.WriteString("## Configuration\n\n")
 	md.WriteString(fmt.Sprintf("- **Docker Image:** `%s`\n", result.Config.Image))
 	md.WriteString(fmt.Sprintf("- **Repository:** %s\n", result.Config.RepoURL))
 	md.WriteString(fmt.Sprintf("- **Command:** `%s`\n", result.Config.Command))
 	md.WriteString(fmt.Sprintf("- **Runs per Config:** %d\n", result.Config.Runs))
+
+	// Type-specific configuration
+	switch result.Config.Type {
+	case BenchmarkTypeSweepCPU:
+		md.WriteString(fmt.Sprintf("- **Fixed RAM:** %d GB\n", result.Config.FixedRAM))
+		md.WriteString(fmt.Sprintf("- **CPU Values Tested:** %s\n", formatIntList(result.Config.CPUList)))
+	case BenchmarkTypeSweepRAM:
+		md.WriteString(fmt.Sprintf("- **Fixed CPU:** %d\n", result.Config.FixedCPU))
+		md.WriteString(fmt.Sprintf("- **RAM Values Tested:** %s GB\n", formatIntList(result.Config.RAMList)))
+	case BenchmarkTypeAll:
+		md.WriteString(fmt.Sprintf("- **CPU Values Tested:** %s\n", formatIntList(result.Config.CPUList)))
+		md.WriteString(fmt.Sprintf("- **RAM Values Tested:** %s GB\n", formatIntList(result.Config.RAMList)))
+	}
+
 	if result.Config.SkipWarmup {
 		md.WriteString("- **Warm-up:** Disabled\n")
 	} else {
@@ -264,8 +283,193 @@ func SaveSummaryMarkdown(result *MatrixResult, filename string) error {
 		md.WriteString("\n")
 	}
 
+	// Add graphs section
+	md.WriteString("## Graphs\n\n")
+	graphStr := generateGraphsMarkdown(result)
+	md.WriteString(graphStr)
+
 	_, err = file.WriteString(md.String())
 	return err
+}
+
+// generateGraphsMarkdown generates ASCII graphs as markdown code blocks
+func generateGraphsMarkdown(result *MatrixResult) string {
+	var sb strings.Builder
+
+	switch result.Config.Type {
+	case BenchmarkTypeAll:
+		// Generate CPU sweep graphs (one per RAM value) and RAM sweep graphs (one per CPU value)
+		cpuSet := make(map[int]bool)
+		ramSet := make(map[int]bool)
+		for _, r := range result.Results {
+			cpuSet[r.Config.CPUs] = true
+			ramSet[r.Config.Memory] = true
+		}
+
+		var cpus []int
+		for cpu := range cpuSet {
+			cpus = append(cpus, cpu)
+		}
+		sortInts(cpus)
+
+		var rams []int
+		for ram := range ramSet {
+			rams = append(rams, ram)
+		}
+		sortInts(rams)
+
+		// CPU sweep graphs
+		for _, ram := range rams {
+			graph := generateCPUSweepGraphString(result, ram)
+			if graph != "" {
+				sb.WriteString("```\n")
+				sb.WriteString(graph)
+				sb.WriteString("```\n\n")
+			}
+		}
+
+		// RAM sweep graphs
+		for _, cpu := range cpus {
+			graph := generateRAMSweepGraphString(result, cpu)
+			if graph != "" {
+				sb.WriteString("```\n")
+				sb.WriteString(graph)
+				sb.WriteString("```\n\n")
+			}
+		}
+
+	case BenchmarkTypeSweepCPU:
+		graph := generateCPUSweepGraphString(result, result.Config.FixedRAM)
+		if graph != "" {
+			sb.WriteString("```\n")
+			sb.WriteString(graph)
+			sb.WriteString("```\n\n")
+		}
+
+	case BenchmarkTypeSweepRAM:
+		graph := generateRAMSweepGraphString(result, result.Config.FixedCPU)
+		if graph != "" {
+			sb.WriteString("```\n")
+			sb.WriteString(graph)
+			sb.WriteString("```\n\n")
+		}
+
+	default:
+		// Custom mode - show generic graph
+		graph := generateGenericGraphString(result)
+		if graph != "" {
+			sb.WriteString("```\n")
+			sb.WriteString(graph)
+			sb.WriteString("```\n\n")
+		}
+	}
+
+	return sb.String()
+}
+
+// generateCPUSweepGraphString generates a graph string for CPU sweep at fixed RAM
+func generateCPUSweepGraphString(result *MatrixResult, fixedRAM int) string {
+	var filtered []ConfigResult
+	for _, r := range result.Results {
+		if r.Success && r.Config.Memory == fixedRAM {
+			filtered = append(filtered, r)
+		}
+	}
+
+	if len(filtered) == 0 {
+		return ""
+	}
+
+	title := fmt.Sprintf("Build Time vs CPU (%d GB RAM)", fixedRAM)
+	return generateBarChartString(filtered, title, "cpu")
+}
+
+// generateRAMSweepGraphString generates a graph string for RAM sweep at fixed CPU
+func generateRAMSweepGraphString(result *MatrixResult, fixedCPU int) string {
+	var filtered []ConfigResult
+	for _, r := range result.Results {
+		if r.Success && r.Config.CPUs == fixedCPU {
+			filtered = append(filtered, r)
+		}
+	}
+
+	if len(filtered) == 0 {
+		return ""
+	}
+
+	title := fmt.Sprintf("Build Time vs RAM (%d CPUs)", fixedCPU)
+	return generateBarChartString(filtered, title, "ram")
+}
+
+// generateGenericGraphString generates a graph string for custom benchmark
+func generateGenericGraphString(result *MatrixResult) string {
+	var successful []ConfigResult
+	for _, r := range result.Results {
+		if r.Success {
+			successful = append(successful, r)
+		}
+	}
+
+	if len(successful) == 0 {
+		return ""
+	}
+
+	return generateBarChartString(successful, "Build Time vs Configuration", "config")
+}
+
+// generateBarChartString generates a bar chart as a string
+func generateBarChartString(results []ConfigResult, title string, labelType string) string {
+	if len(results) == 0 {
+		return ""
+	}
+
+	var sb strings.Builder
+
+	sb.WriteString(fmt.Sprintf("%s\n", title))
+	sb.WriteString(fmt.Sprintf("%s\n\n", strings.Repeat("=", len(title))))
+
+	// Find max mean time for scaling
+	maxMean := 0.0
+	for _, r := range results {
+		if r.Mean > maxMean {
+			maxMean = r.Mean
+		}
+	}
+
+	graphWidth := 50
+
+	for _, r := range results {
+		barWidth := int((r.Mean / maxMean) * float64(graphWidth))
+		if barWidth < 1 {
+			barWidth = 1
+		}
+
+		bar := strings.Repeat("█", barWidth)
+
+		var label string
+		switch labelType {
+		case "cpu":
+			label = fmt.Sprintf("%2d CPU", r.Config.CPUs)
+		case "ram":
+			label = fmt.Sprintf("%2d GB", r.Config.Memory)
+		default:
+			label = fmt.Sprintf("%2d CPU %2d GB", r.Config.CPUs, r.Config.Memory)
+		}
+
+		timeLabel := formatDuration(r.Mean)
+		sb.WriteString(fmt.Sprintf("%s │%s %s\n", label, bar, timeLabel))
+	}
+
+	sb.WriteString(fmt.Sprintf("       └%s\n", strings.Repeat("─", graphWidth+10)))
+	sb.WriteString(fmt.Sprintf("        0%s%s\n",
+		strings.Repeat(" ", graphWidth/2-1),
+		formatDuration(maxMean/2)))
+	sb.WriteString(fmt.Sprintf("        %s%s\n",
+		strings.Repeat(" ", graphWidth-len(formatDuration(maxMean))+8),
+		formatDuration(maxMean)))
+	sb.WriteString("\n")
+
+	return sb.String()
 }
 
 // formatDuration formats a duration in seconds to a human-readable string
@@ -296,7 +500,19 @@ func formatDuration(seconds float64) string {
 	return fmt.Sprintf("%.0fms", seconds*1000)
 }
 
-// PrintBuildTimeGraph prints an ASCII bar chart of build time vs CPU count
+// formatIntList formats a slice of ints as a comma-separated string
+func formatIntList(ints []int) string {
+	if len(ints) == 0 {
+		return ""
+	}
+	strs := make([]string, len(ints))
+	for i, v := range ints {
+		strs[i] = fmt.Sprintf("%d", v)
+	}
+	return strings.Join(strs, ", ")
+}
+
+// PrintBuildTimeGraph prints an ASCII bar chart of build time based on benchmark type
 func PrintBuildTimeGraph(result *MatrixResult) {
 	// Filter successful results only
 	var successful []ConfigResult
@@ -310,8 +526,22 @@ func PrintBuildTimeGraph(result *MatrixResult) {
 		return
 	}
 
-	fmt.Printf("Build Time vs CPU Count\n")
-	fmt.Printf("=======================\n\n")
+	// Determine graph title based on benchmark type
+	var title string
+	switch result.Config.Type {
+	case BenchmarkTypeSweepCPU:
+		title = fmt.Sprintf("Build Time vs CPU (%d GB RAM)", result.Config.FixedRAM)
+	case BenchmarkTypeSweepRAM:
+		title = fmt.Sprintf("Build Time vs RAM (%d CPUs)", result.Config.FixedCPU)
+	case BenchmarkTypeAll:
+		// For "all" mode, use PrintAllGraphs instead
+		title = "Build Time vs Configuration"
+	default:
+		title = "Build Time vs Configuration"
+	}
+
+	fmt.Printf("%s\n", title)
+	fmt.Printf("%s\n\n", strings.Repeat("=", len(title)))
 
 	// Find max mean time for scaling
 	maxMean := 0.0
@@ -335,14 +565,22 @@ func PrintBuildTimeGraph(result *MatrixResult) {
 		// Create the bar
 		bar := strings.Repeat("█", barWidth)
 
-		// Format CPU label (right-aligned)
-		cpuLabel := fmt.Sprintf("%2d CPU", r.Config.CPUs)
+		// Format label based on benchmark type
+		var label string
+		switch result.Config.Type {
+		case BenchmarkTypeSweepCPU:
+			label = fmt.Sprintf("%2d CPU", r.Config.CPUs)
+		case BenchmarkTypeSweepRAM:
+			label = fmt.Sprintf("%2d GB", r.Config.Memory)
+		default:
+			label = fmt.Sprintf("%2d CPU %2d GB", r.Config.CPUs, r.Config.Memory)
+		}
 
 		// Format time label
 		timeLabel := formatDuration(r.Mean)
 
 		// Print the row
-		fmt.Printf("%s │%s %s\n", cpuLabel, bar, timeLabel)
+		fmt.Printf("%s │%s %s\n", label, bar, timeLabel)
 	}
 
 	// Print x-axis
@@ -355,4 +593,147 @@ func PrintBuildTimeGraph(result *MatrixResult) {
 		formatDuration(maxMean))
 
 	fmt.Printf("\n")
+}
+
+// PrintAllGraphs prints multiple graphs for "all" benchmark mode
+// One graph per RAM value showing CPU scaling, and one graph per CPU value showing RAM scaling
+func PrintAllGraphs(result *MatrixResult) {
+	if result.Config.Type != BenchmarkTypeAll {
+		PrintBuildTimeGraph(result)
+		return
+	}
+
+	// Get unique CPU and RAM values
+	cpuSet := make(map[int]bool)
+	ramSet := make(map[int]bool)
+	for _, r := range result.Results {
+		cpuSet[r.Config.CPUs] = true
+		ramSet[r.Config.Memory] = true
+	}
+
+	// Convert to sorted slices
+	var cpus []int
+	for cpu := range cpuSet {
+		cpus = append(cpus, cpu)
+	}
+	sortInts(cpus)
+
+	var rams []int
+	for ram := range ramSet {
+		rams = append(rams, ram)
+	}
+	sortInts(rams)
+
+	// Print CPU sweep graphs (one per RAM value)
+	for _, ram := range rams {
+		printCPUSweepGraph(result, ram)
+	}
+
+	// Print RAM sweep graphs (one per CPU value)
+	for _, cpu := range cpus {
+		printRAMSweepGraph(result, cpu)
+	}
+}
+
+// printCPUSweepGraph prints a graph showing build time vs CPU for a fixed RAM value
+func printCPUSweepGraph(result *MatrixResult, fixedRAM int) {
+	// Filter results for this RAM value
+	var filtered []ConfigResult
+	for _, r := range result.Results {
+		if r.Success && r.Config.Memory == fixedRAM {
+			filtered = append(filtered, r)
+		}
+	}
+
+	if len(filtered) == 0 {
+		return
+	}
+
+	title := fmt.Sprintf("Build Time vs CPU (%d GB RAM)", fixedRAM)
+	fmt.Printf("%s\n", title)
+	fmt.Printf("%s\n\n", strings.Repeat("=", len(title)))
+
+	printBarChart(filtered, "cpu")
+}
+
+// printRAMSweepGraph prints a graph showing build time vs RAM for a fixed CPU value
+func printRAMSweepGraph(result *MatrixResult, fixedCPU int) {
+	// Filter results for this CPU value
+	var filtered []ConfigResult
+	for _, r := range result.Results {
+		if r.Success && r.Config.CPUs == fixedCPU {
+			filtered = append(filtered, r)
+		}
+	}
+
+	if len(filtered) == 0 {
+		return
+	}
+
+	title := fmt.Sprintf("Build Time vs RAM (%d CPUs)", fixedCPU)
+	fmt.Printf("%s\n", title)
+	fmt.Printf("%s\n\n", strings.Repeat("=", len(title)))
+
+	printBarChart(filtered, "ram")
+}
+
+// printBarChart prints a bar chart for the given results
+// labelType is "cpu" or "ram" to determine axis labels
+func printBarChart(results []ConfigResult, labelType string) {
+	if len(results) == 0 {
+		return
+	}
+
+	// Find max mean time for scaling
+	maxMean := 0.0
+	for _, r := range results {
+		if r.Mean > maxMean {
+			maxMean = r.Mean
+		}
+	}
+
+	// Graph parameters
+	graphWidth := 50
+
+	// Print each bar
+	for _, r := range results {
+		barWidth := int((r.Mean / maxMean) * float64(graphWidth))
+		if barWidth < 1 {
+			barWidth = 1
+		}
+
+		bar := strings.Repeat("█", barWidth)
+
+		var label string
+		if labelType == "cpu" {
+			label = fmt.Sprintf("%2d CPU", r.Config.CPUs)
+		} else {
+			label = fmt.Sprintf("%2d GB", r.Config.Memory)
+		}
+
+		timeLabel := formatDuration(r.Mean)
+		fmt.Printf("%s │%s %s\n", label, bar, timeLabel)
+	}
+
+	// Print x-axis
+	fmt.Printf("       └%s\n", strings.Repeat("─", graphWidth+10))
+	fmt.Printf("        0%s%s\n",
+		strings.Repeat(" ", graphWidth/2-1),
+		formatDuration(maxMean/2))
+	fmt.Printf("        %s%s\n",
+		strings.Repeat(" ", graphWidth-len(formatDuration(maxMean))+8),
+		formatDuration(maxMean))
+
+	fmt.Printf("\n")
+}
+
+// sortInts sorts a slice of ints in ascending order
+func sortInts(a []int) {
+	for i := 0; i < len(a)-1; i++ {
+		for j := i + 1; j < len(a); j++ {
+			if a[i] > a[j] {
+				a[i], a[j] = a[j], a[i]
+			}
+		}
+	}
 }
