@@ -121,10 +121,21 @@ The tool generates four types of output:
 
 Matrix mode allows you to benchmark across multiple CPU/RAM configurations using Docker containers. Each configuration runs sequentially to avoid resource contention.
 
-### Basic Matrix Command
+Matrix mode has four subcommands:
+
+| Subcommand | Description |
+|------------|-------------|
+| `custom` | Run benchmarks with arbitrary CPU:RAM configuration pairs |
+| `sweep-cpu` | Run benchmarks varying CPU count with fixed RAM |
+| `sweep-ram` | Run benchmarks varying RAM with fixed CPU count |
+| `all` | Run benchmarks across a full CPU x RAM grid |
+
+### Matrix Custom
+
+Run benchmarks with arbitrary CPU:RAM configuration pairs:
 
 ```bash
-./caliper matrix \
+./caliper matrix custom \
   --image ubuntu-2404-go-rust \
   --repo https://github.com/influxdata/influxdb \
   --runs 10 \
@@ -132,18 +143,78 @@ Matrix mode allows you to benchmark across multiple CPU/RAM configurations using
   --configs "2:8,4:16,8:32,16:64,32:128"
 ```
 
+### Matrix Sweep CPU
+
+Run benchmarks varying CPU count while keeping RAM constant:
+
+```bash
+./caliper matrix sweep-cpu \
+  --image ubuntu-2404-go-rust \
+  --repo https://github.com/influxdata/influxdb \
+  --runs 10 \
+  --command "cargo clean && cargo build" \
+  --ram 16 \
+  --cpus "2,4,8,16,32"
+```
+
+### Matrix Sweep RAM
+
+Run benchmarks varying RAM while keeping CPU count constant:
+
+```bash
+./caliper matrix sweep-ram \
+  --image ubuntu-2404-go-rust \
+  --repo https://github.com/influxdata/influxdb \
+  --runs 10 \
+  --command "cargo clean && cargo build" \
+  --cpu 4 \
+  --rams "8,16,32,64"
+```
+
+### Matrix All
+
+Run benchmarks across all combinations of CPU and RAM values (full grid):
+
+```bash
+./caliper matrix all \
+  --image ubuntu-2404-go-rust \
+  --repo https://github.com/influxdata/influxdb \
+  --runs 10 \
+  --command "cargo clean && cargo build" \
+  --cpus "2,4,8,16" \
+  --rams "8,16,32,64"
+```
+
+This tests all 16 configurations (4 CPUs x 4 RAMs) and generates:
+- 4 graphs showing CPU scaling (one per RAM value)
+- 4 graphs showing RAM scaling (one per CPU value)
+
 ### Matrix Command-Line Options
+
+**Common flags (all subcommands):**
 
 | Flag | Shorthand | Required | Description |
 |------|-----------|----------|-------------|
 | `--image` | | Yes | Docker image to use |
 | `--repo` | | Yes | Git repository URL to clone |
 | `--command` | `-c` | Yes | Command to benchmark |
-| `--configs` | | Yes | CPU:RAM configurations (e.g., `2:8,4:16,8:32`) |
 | `--runs` | `-n` | No | Number of runs per configuration (default: 10) |
 | `--output-dir` | | No | Directory for output files (default: `./matrix-results`) |
 | `--name` | | No | Benchmark name (default: timestamp) |
 | `--no-warmup` | | No | Skip the warm-up run |
+| `--debug` | | No | Enable debug logging with real-time output |
+
+**Subcommand-specific flags:**
+
+| Subcommand | Flag | Required | Description |
+|------------|------|----------|-------------|
+| `custom` | `--configs` | Yes | CPU:RAM configurations (e.g., `2:8,4:16,8:32`) |
+| `sweep-cpu` | `--cpus` | Yes | CPU values to test (e.g., `2,4,8,16`) |
+| `sweep-cpu` | `--ram` | Yes | Fixed RAM in GB |
+| `sweep-ram` | `--rams` | Yes | RAM values in GB to test (e.g., `8,16,32,64`) |
+| `sweep-ram` | `--cpu` | Yes | Fixed CPU count |
+| `all` | `--cpus` | Yes | CPU values to test (e.g., `2,4,8,16`) |
+| `all` | `--rams` | Yes | RAM values in GB to test (e.g., `8,16,32,64`) |
 
 ### How Matrix Mode Works
 
@@ -160,20 +231,28 @@ Configurations run **sequentially** to ensure accurate measurements without reso
 
 ### Matrix Output Structure
 
+Output files are named with the repository name and benchmark type:
+
 ```
 matrix-results/
 ├── 2cpu_8gb/
-│   ├── benchmark_2cpu_8gb.json
-│   ├── benchmark_2cpu_8gb.csv
-│   └── benchmark_2cpu_8gb.md
+│   ├── influxdb_2cpu_8gb.json
+│   ├── influxdb_2cpu_8gb.csv
+│   └── influxdb_2cpu_8gb.md
 ├── 4cpu_16gb/
 │   └── ...
 ├── 8cpu_32gb/
 │   └── ...
-├── matrix_summary.json
-├── matrix_summary.csv
-└── matrix_summary.md
+├── influxdb_custom_summary.json      # For matrix custom
+├── influxdb_custom_summary.csv
+├── influxdb_custom_summary.md
+├── influxdb_sweep-cpu_summary.json   # For matrix sweep-cpu
+├── influxdb_sweep-ram_summary.json   # For matrix sweep-ram
+├── influxdb_all_summary.json         # For matrix all
+└── ...
 ```
+
+The Markdown output includes ASCII graphs showing build time scaling.
 
 ### Matrix Summary Table
 
@@ -196,6 +275,36 @@ CPUs  RAM      Mean     Median   Std Dev  Min      Max      Success
 16    64 GB    1m15s    1m12s    3.8s     1m08s    1m22s    100%
 32    128 GB   58s      56s      2.1s     54s      1m02s    100%
 ```
+
+### Matrix Graphs
+
+Each benchmark type generates appropriate ASCII graphs:
+
+**sweep-cpu** - Shows build time vs CPU count:
+```
+Build Time vs CPU (16 GB RAM)
+=============================
+
+ 2 CPU │████████████████████████████████████████ 5m32s
+ 4 CPU │██████████████████████████████ 4m12s
+ 8 CPU │████████████████████ 2m48s
+16 CPU │███████████████ 2m05s
+       └──────────────────────────────────────────────
+```
+
+**sweep-ram** - Shows build time vs RAM:
+```
+Build Time vs RAM (4 CPUs)
+==========================
+
+ 8 GB │████████████████████████████████████████ 5m32s
+16 GB │██████████████████████████████████████ 5m10s
+32 GB │██████████████████████████████ 4m12s
+64 GB │████████████████████████ 3m20s
+      └──────────────────────────────────────────────
+```
+
+**all** - Generates multiple graphs (one CPU sweep per RAM value, one RAM sweep per CPU value)
 
 ## Output Format
 
